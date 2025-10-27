@@ -1,4 +1,4 @@
-name: Generate Prompt Analysis Report
+name: Generate RAG Prompt Analysis Report
 
 on:
   schedule:
@@ -8,36 +8,27 @@ on:
       query_limit:
         description: 'Number of queries to process'
         required: false
-        default: '5000'
+        default: '1500'
       prompt_limit:
         description: 'Number of prompts to process'
         required: false
         default: '200'
-      project:
-        description: 'Which project to run'
-        required: false
-        default: 'both'
-        type: choice
-        options:
-          - '1'      # LLM-only
-          - '2'      # RAG + LLM
-          - 'both'   # run both
+
+concurrency:
+  group: rag-report
+  cancel-in-progress: true
 
 jobs:
-  generate-report:
+  rag-report:
     runs-on: ubuntu-latest
-
-    # Make secrets available to all steps
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      # Safe defaults if workflow_dispatch inputs are empty (e.g., on schedule)
-      QUERY_LIMIT: ${{ github.event.inputs.query_limit != '' && github.event.inputs.query_limit || '5000' }}
+      QUERY_LIMIT: ${{ github.event.inputs.query_limit != '' && github.event.inputs.query_limit || '1500' }}
       PROMPT_LIMIT: ${{ github.event.inputs.prompt_limit != '' && github.event.inputs.prompt_limit || '200' }}
-      PROJECT: ${{ github.event.inputs.project != '' && github.event.inputs.project || 'both' }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -57,15 +48,14 @@ jobs:
           from huggingface_hub import login
           tok = os.environ.get("HF_TOKEN")
           if not tok:
-              raise SystemExit("HF_TOKEN missing; add it in repo Settings → Secrets → Actions.")
+            raise SystemExit("HF_TOKEN missing. Add it in Settings → Secrets → Actions.")
           login(token=tok, add_to_git_credential=False)
           print("✅ Hugging Face login OK")
           PY
 
-      - name: Create directories
+      - name: Create folders
         run: |
           mkdir -p shared/data
-          mkdir -p pro1_LLM_only/data pro1_LLM_only/reports
           mkdir -p pro2_RAG_LLM/data pro2_RAG_LLM/reports
 
       - name: Load datasets
@@ -76,17 +66,7 @@ jobs:
             --limit "$QUERY_LIMIT" \
             --prompt-limit "$PROMPT_LIMIT"
 
-      - name: Generate Project 1 report (LLM Only)
-        if: ${{ env.PROJECT == '1' || env.PROJECT == 'both' }}
-        run: |
-          python pro1_LLM_only/match_and_report.py \
-            --prompts shared/data/prompts.csv \
-            --queries shared/data/queries.csv \
-            --out pro1_LLM_only/reports/prompt_analysis_$(date +%Y%m%d).xlsx \
-            --model gpt-4o-mini
-
-      - name: Generate Project 2 report (RAG + LLM)
-        if: ${{ env.PROJECT == '2' || env.PROJECT == 'both' }}
+      - name: Generate RAG report (Project 2)
         run: |
           python pro2_RAG_LLM/match_and_report.py \
             --prompts shared/data/prompts.csv \
@@ -97,9 +77,8 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: prompttrack-artifacts-${{ github.run_number }}
+          name: rag-report-${{ github.run_number }}
           path: |
-            pro1_LLM_only/reports/*.xlsx
             pro2_RAG_LLM/reports/*.xlsx
             shared/data/*.csv
           retention-days: 90
