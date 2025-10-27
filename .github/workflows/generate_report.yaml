@@ -1,0 +1,117 @@
+name: Generate Prompt Analysis Report
+
+on:
+  # Run on schedule (daily at 2 AM UTC)
+  schedule:
+    - cron: '0 2 * * *'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      query_limit:
+        description: 'Number of queries to process'
+        required: false
+        default: '5000'
+      prompt_limit:
+        description: 'Number of prompts to process'
+        required: false
+        default: '200'
+      project:
+        description: 'Which project to run (1, 2, or both)'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - 'both'
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+        cache-dependency-path: 'shared/requirements.txt'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r shared/requirements.txt
+    
+    - name: Create directories
+      run: |
+        mkdir -p shared/data
+        mkdir -p project1_llm_only/{data,reports}
+        mkdir -p project2_rag_llm/{data,reports}
+    
+    - name: Load datasets
+      run: |
+        python shared/load_datasets.py \
+          --queries-out shared/data/queries.csv \
+          --prompts-out shared/data/prompts.csv \
+          --limit ${{ github.event.inputs.query_limit || '5000' }} \
+          --prompt-limit ${{ github.event.inputs.prompt_limit || '200' }}
+    
+    - name: Generate Project 1 report (LLM Only)
+      if: ${{ github.event.inputs.project == '1' || github.event.inputs.project == 'both' || github.event.inputs.project == '' }}
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      run: |
+        python project1_llm_only/match_and_report.py \
+          --prompts shared/data/prompts.csv \
+          --queries shared/data/queries.csv \
+          --out project1_llm_only/reports/prompt_analysis_$(date +%Y%m%d).xlsx \
+          --model gpt-4o-mini
+    
+    - name: Generate Project 2 report (RAG + LLM)
+      if: ${{ github.event.inputs.project == '2' || github.event.inputs.project == 'both' || github.event.inputs.project == '' }}
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      run: |
+        python project2_rag_llm/match_and_report.py \
+          --prompts shared/data/prompts.csv \
+          --queries shared/data/queries.csv \
+          --out project2_rag_llm/reports/prompt_analysis_$(date +%Y%m%d).xlsx \
+          --model gpt-4o-mini
+    
+    - name: Upload Project 1 report
+      if: ${{ github.event.inputs.project == '1' || github.event.inputs.project == 'both' || github.event.inputs.project == '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: project1-report-${{ github.run_number }}
+        path: project1_llm_only/reports/*.xlsx
+        retention-days: 90
+    
+    - name: Upload Project 2 report
+      if: ${{ github.event.inputs.project == '2' || github.event.inputs.project == 'both' || github.event.inputs.project == '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: project2-report-${{ github.run_number }}
+        path: project2_rag_llm/reports/*.xlsx
+        retention-days: 90
+    
+    - name: Upload datasets
+      uses: actions/upload-artifact@v4
+      with:
+        name: datasets-${{ github.run_number }}
+        path: shared/data/*.csv
+        retention-days: 30
+    
+    # Optional: Commit reports to repository (disabled by default)
+    # Uncomment if you want reports committed to the repo
+    # - name: Commit and push reports
+    #   if: github.event_name == 'schedule'
+    #   run: |
+    #     git config --local user.email "github-actions[bot]@users.noreply.github.com"
+    #     git config --local user.name "github-actions[bot]"
+    #     git add project1_llm_only/reports/*.xlsx project2_rag_llm/reports/*.xlsx
+    #     git commit -m "Auto-generated reports: $(date +%Y-%m-%d)" || echo "No changes to commit"
+    #     git push || echo "Nothing to push
