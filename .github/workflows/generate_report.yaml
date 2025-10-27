@@ -24,8 +24,9 @@ jobs:
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      QUERY_LIMIT: ${{ github.event.inputs.query_limit != '' && github.event.inputs.query_limit || '1500' }}
-      PROMPT_LIMIT: ${{ github.event.inputs.prompt_limit != '' && github.event.inputs.prompt_limit || '200' }}
+      TOPK: '3'
+      EMBED_ONLY_THRESHOLD: '0.88'
+      CONCURRENCY: '10'
 
     steps:
       - name: Checkout repo
