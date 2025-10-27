@@ -1,4 +1,5 @@
 import argparse
+import os
 import pandas as pd
 from datasets import load_dataset
 from pathlib import Path
@@ -6,7 +7,11 @@ from pathlib import Path
 def extract_user_queries(limit=None):
     """Extract user queries from chatbot arena dataset"""
     print("Loading chatbot arena conversations dataset...")
-    ds = load_dataset("lmsys/chatbot_arena_conversations")
+    
+    # Get HuggingFace token from environment
+    hf_token = os.getenv("HF_TOKEN")
+    
+    ds = load_dataset("lmsys/chatbot_arena_conversations", token=hf_token)
     rows = []
     for row in ds["train"]:
         cid = row.get("conversation_id")

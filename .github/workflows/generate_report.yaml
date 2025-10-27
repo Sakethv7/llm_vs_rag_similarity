@@ -58,6 +58,8 @@ jobs:
         mkdir -p project2_rag_llm/data project2_rag_llm/reports
     
     - name: Load datasets
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
         python shared/load_datasets.py \
           --queries-out shared/data/queries.csv \
