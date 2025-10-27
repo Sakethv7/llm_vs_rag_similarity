@@ -2,7 +2,7 @@ name: Generate Prompt Analysis Report
 
 on:
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * *'     # daily at 02:00 UTC
   workflow_dispatch:
     inputs:
       query_limit:
@@ -14,71 +14,92 @@ on:
         required: false
         default: '200'
       project:
-        description: 'Which project to run (1, 2, or both)'
+        description: 'Which project to run'
         required: false
         default: 'both'
         type: choice
         options:
-          - '1'
-          - '2'
-          - 'both'
+          - '1'      # LLM-only
+          - '2'      # RAG + LLM
+          - 'both'   # run both
 
 jobs:
   generate-report:
     runs-on: ubuntu-latest
+
+    # Make secrets available to all steps
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Safe defaults if workflow_dispatch inputs are empty (e.g., on schedule)
+      QUERY_LIMIT: ${{ github.event.inputs.query_limit != '' && github.event.inputs.query_limit || '5000' }}
+      PROMPT_LIMIT: ${{ github.event.inputs.prompt_limit != '' && github.event.inputs.prompt_limit || '200' }}
+      PROJECT: ${{ github.event.inputs.project != '' && github.event.inputs.project || 'both' }}
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-    - name: Create directories
-      run: |
-        mkdir -p shared/data
-        mkdir -p pro1_LLM_only/data pro1_LLM_only/reports
-        mkdir -p pro2_RAG_LLM/data pro2_RAG_LLM/reports
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Load datasets
-      run: |
-        python shared/load_datasets.py \
-          --queries-out shared/data/queries.csv \
-          --prompts-out shared/data/prompts.csv \
-          --limit ${{ github.event.inputs.query_limit || '5000' }} \
-          --prompt-limit ${{ github.event.inputs.prompt_limit || '200' }}
+      - name: Login to Hugging Face
+        run: |
+          python - << 'PY'
+          import os
+          from huggingface_hub import login
+          tok = os.environ.get("HF_TOKEN")
+          if not tok:
+              raise SystemExit("HF_TOKEN missing; add it in repo Settings → Secrets → Actions.")
+          login(token=tok, add_to_git_credential=False)
+          print("✅ Hugging Face login OK")
+          PY
 
-    - name: Generate Project 1 report (LLM Only)
-      if: ${{ github.event.inputs.project == '1' || github.event.inputs.project == 'both' || github.event.inputs.project == '' }}
-      run: |
-        python pro1_LLM_only/match_and_report.py \
-          --prompts shared/data/prompts.csv \
-          --queries shared/data/queries.csv \
-          --out pro1_LLM_only/reports/prompt_analysis_$(date +%Y%m%d).xlsx \
-          --model gpt-4o-mini
+      - name: Create directories
+        run: |
+          mkdir -p shared/data
+          mkdir -p pro1_LLM_only/data pro1_LLM_only/reports
+          mkdir -p pro2_RAG_LLM/data pro2_RAG_LLM/reports
 
-    - name: Generate Project 2 report (RAG + LLM)
-      if: ${{ github.event.inputs.project == '2' || github.event.inputs.project == 'both' || github.event.inputs.project == '' }}
-      run: |
-        python pro2_RAG_LLM/match_and_report.py \
-          --prompts shared/data/prompts.csv \
-          --queries shared/data/queries.csv \
-          --out pro2_RAG_LLM/reports/prompt_analysis_$(date +%Y%m%d).xlsx \
-          --model gpt-4o-mini
+      - name: Load datasets
+        run: |
+          python shared/load_datasets.py \
+            --queries-out shared/data/queries.csv \
+            --prompts-out shared/data/prompts.csv \
+            --limit "$QUERY_LIMIT" \
+            --prompt-limit "$PROMPT_LIMIT"
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: prompt-reports-${{ github.run_number }}
-        path: |
-          pro1_LLM_only/reports/*.xlsx
-          pro2_RAG_LLM/reports/*.xlsx
-          shared/data/*.csv
-        retention-days: 90
+      - name: Generate Project 1 report (LLM Only)
+        if: ${{ env.PROJECT == '1' || env.PROJECT == 'both' }}
+        run: |
+          python pro1_LLM_only/match_and_report.py \
+            --prompts shared/data/prompts.csv \
+            --queries shared/data/queries.csv \
+            --out pro1_LLM_only/reports/prompt_analysis_$(date +%Y%m%d).xlsx \
+            --model gpt-4o-mini
+
+      - name: Generate Project 2 report (RAG + LLM)
+        if: ${{ env.PROJECT == '2' || env.PROJECT == 'both' }}
+        run: |
+          python pro2_RAG_LLM/match_and_report.py \
+            --prompts shared/data/prompts.csv \
+            --queries shared/data/queries.csv \
+            --out pro2_RAG_LLM/reports/prompt_analysis_$(date +%Y%m%d).xlsx \
+            --model gpt-4o-mini
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompttrack-artifacts-${{ github.run_number }}
+          path: |
+            pro1_LLM_only/reports/*.xlsx
+            pro2_RAG_LLM/reports/*.xlsx
+            shared/data/*.csv
+          retention-days: 90
