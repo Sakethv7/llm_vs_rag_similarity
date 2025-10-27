@@ -21,19 +21,20 @@ concurrency:
 jobs:
   rag-report:
     runs-on: ubuntu-latest
+
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       TOPK: '3'
       EMBED_ONLY_THRESHOLD: '0.88'
       CONCURRENCY: '10'
+      QUERY_LIMIT: ${{ github.event.inputs.query_limit || '1500' }}
+      PROMPT_LIMIT: ${{ github.event.inputs.prompt_limit || '200' }}
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
@@ -42,38 +43,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Login to Hugging Face
-        run: |
-          python - << 'PY'
-          import os
-          from huggingface_hub import login
-          tok = os.environ.get("HF_TOKEN")
-          if not tok:
-            raise SystemExit("HF_TOKEN missing. Add it in Settings → Secrets → Actions.")
-          login(token=tok, add_to_git_credential=False)
-          print("✅ Hugging Face login OK")
-          PY
-
       - name: Create folders
         run: |
           mkdir -p shared/data
-          mkdir -p pro2_RAG_LLM/data pro2_RAG_LLM/reports
+          mkdir -p pro2_RAG_LLM/reports
 
       - name: Load datasets
         run: |
+          echo "Running load_datasets with limit=$QUERY_LIMIT and prompt-limit=$PROMPT_LIMIT"
           python shared/load_datasets.py \
             --queries-out shared/data/queries.csv \
             --prompts-out shared/data/prompts.csv \
-            --limit "$QUERY_LIMIT" \
-            --prompt-limit "$PROMPT_LIMIT"
+            --limit ${QUERY_LIMIT} \
+            --prompt-limit ${PROMPT_LIMIT}
 
-      - name: Generate RAG report (Project 2)
+      - name: Generate RAG report
         run: |
-          python pro2_RAG_LLM/match_and_report.py \
+          python pro2_RAG_LLM/match_RAG_report.py \
             --prompts shared/data/prompts.csv \
             --queries shared/data/queries.csv \
-            --out pro2_RAG_LLM/reports/prompt_analysis_$(date +%Y%m%d).xlsx \
-            --model gpt-4o-mini
+            --out pro2_RAG_LLM/reports/prompt_analysis_$(date +%Y%m%d).xlsx
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
