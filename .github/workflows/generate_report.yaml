@@ -59,7 +59,7 @@ jobs:
 
       - name: Generate RAG report
         run: |
-          python pro2_RAG_LLM/match_RAG_report.py \
+          python pro2_RAG_LLM/match_and_report.py \
             --prompts shared/data/prompts.csv \
             --queries shared/data/queries.csv \
             --out pro2_RAG_LLM/reports/prompt_analysis_$(date +%Y%m%d).xlsx
